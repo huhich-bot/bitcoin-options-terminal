@@ -14,7 +14,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Принудительная темная тема и полная стилизация (Main + Sidebar + Tooltips) ---
+# --- Примусова темна тема та стилізація (Main + Sidebar + Tooltips) ---
 st.markdown(
     """
 <style>
@@ -26,7 +26,7 @@ st.markdown(
         font-family: 'Inter', sans-serif;
     }
     
-    /* --- СТИЛИЗАЦИЯ САЙДБАРА --- */
+    /* --- СТИЛІЗАЦІЯ САЙДБАРА --- */
     section[data-testid="stSidebar"] {
         background-color: #0e1117 !important;
         border-right: 1px solid #1e2430 !important;
@@ -77,7 +77,7 @@ st.markdown(
         border-color: #38bdf8;
     }
     
-    /* Кнопка обновления */
+    /* Кнопка оновлення */
     section[data-testid="stSidebar"] .stButton > button {
         background: linear-gradient(145deg, #1a2333 0%, #101622 100%) !important;
         color: #38bdf8 !important;
@@ -95,7 +95,7 @@ st.markdown(
         box-shadow: 0 0 15px rgba(56, 189, 248, 0.5) !important;
     }
 
-    /* --- СТИЛИЗАЦИЯ ВКЛАДОК (TABS) --- */
+    /* --- СТИЛІЗАЦІЯ ВКЛАДОК (TABS) --- */
     button[data-baseweb="tab"] {
         background-color: transparent !important;
         color: #8b949e !important;
@@ -108,7 +108,7 @@ st.markdown(
         border-bottom: 2px solid #38bdf8 !important;
     }
 
-    /* --- СТИЛИЗАЦИЯ КАРТОЧЕК МЕТРИК И ПОДКАЗОК (TOOLTIPS) --- */
+    /* --- СТИЛІЗАЦІЯ КАРТОЧОК МЕТРИК ТА ПІДКАЗОК (TOOLTIPS) --- */
     .metric-card {
         background: linear-gradient(145deg, #161b26 0%, #0e1117 100%);
         border: 1px solid #212638;
@@ -191,7 +191,7 @@ st.markdown(
 
 st.title("₿ BTC Options & Derivatives Institutional Terminal")
 
-# --- 1. Инициализация и Загрузка Данных ---
+# --- 1. Ініціалізація та завантаження даних ---
 api = DeribitAPI()
 
 
@@ -214,12 +214,18 @@ def load_data():
 def fetch_funding_and_basis(current_btc_price):
     fut_price = current_btc_price
     funding_8h = 0.01
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
 
     # 1. Запит до Bybit API
     try:
         url = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
-        res = requests.get(url, timeout=3).json()
-        result = res.get("result", {}).get("list", [])[0]
+        res = requests.get(url, headers=headers, timeout=5).json()
+        result = (res.get("result") or {}).get("list", [])[0]
         fut_price = float(result.get("markPrice", current_btc_price))
         funding_8h = float(result.get("fundingRate", 0.0001)) * 100
         return fut_price, funding_8h
@@ -241,12 +247,19 @@ def fetch_funding_and_basis(current_btc_price):
 @st.cache_data(ttl=15)
 def fetch_cvd_delta():
     spot_delta_usd, futures_delta_usd = 0.0, 0.0
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
 
+    # 1. Spot CVD (Bybit Spot API)
     try:
-        # Spot CVD (Bybit Spot API)
         url_spot = "https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60&limit=4"
-        res_s = requests.get(url_spot, timeout=3).json()
-        list_s = res_s.get("result", {}).get("list", [])
+        res_s = requests.get(url_spot, headers=headers, timeout=5).json()
+        result_s = res_s.get("result") or {}
+        list_s = result_s.get("list", [])
 
         s_buy, s_tot = 0.0, 0.0
         for k in list_s:
@@ -256,12 +269,17 @@ def fetch_cvd_delta():
             s_tot += turnover
             if close_p >= open_p:
                 s_buy += turnover
-        spot_delta_usd = (2 * s_buy - s_tot) / 1e6
+        if s_tot > 0:
+            spot_delta_usd = (2 * s_buy - s_tot) / 1e6
+    except Exception:
+        pass
 
-        # Futures CVD (Bybit Linear API)
+    # 2. Futures CVD (Bybit Linear API)
+    try:
         url_fut = "https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=60&limit=4"
-        res_f = requests.get(url_fut, timeout=3).json()
-        list_f = res_f.get("result", {}).get("list", [])
+        res_f = requests.get(url_fut, headers=headers, timeout=5).json()
+        result_f = res_f.get("result") or {}
+        list_f = result_f.get("list", [])
 
         f_buy, f_tot = 0.0, 0.0
         for k in list_f:
@@ -271,8 +289,8 @@ def fetch_cvd_delta():
             f_tot += turnover
             if close_p >= open_p:
                 f_buy += turnover
-        futures_delta_usd = (2 * f_buy - f_tot) / 1e6
-
+        if f_tot > 0:
+            futures_delta_usd = (2 * f_buy - f_tot) / 1e6
     except Exception:
         pass
 
@@ -354,9 +372,9 @@ fut_price, funding_8h = fetch_funding_and_basis(btc_price)
 spot_delta_usd, futures_delta_usd = fetch_cvd_delta()
 
 # --- 2. Сайдбар ---
-st.sidebar.header("⚙️ Настройки")
+st.sidebar.header("⚙️ Налаштування")
 selected_tf = st.sidebar.selectbox(
-    "Таймфрейм графика",
+    "Таймфрейм графіка",
     [
         "15 мин (3 дня)",
         "1 час (14 дней)",
@@ -369,12 +387,12 @@ selected_tf = st.sidebar.selectbox(
 analytics = OptionAnalytics(df_options) if not df_options.empty else None
 expirations = analytics.get_expirations() if analytics else []
 
-st.sidebar.header("📅 Фильтр Экспирации")
+st.sidebar.header("📅 Фільтр Експірації")
 selected_exp = st.sidebar.selectbox(
-    "Выберите дату экспирации:", ["Все"] + expirations, index=0
+    "Оберіть дату експірації:", ["Все"] + expirations, index=0
 )
 
-# --- Расчет времени до экспирации и суммы (Open Interest) ---
+# --- Розрахунок часу до експірації та суми (Open Interest) ---
 time_left_str = "Н/Д"
 exp_notional_str = "Н/Д"
 
@@ -514,7 +532,7 @@ if st.sidebar.button("🔄 Обновить данные"):
     st.cache_data.clear()
     st.rerun()
 
-# --- 3. Расчет аналитики ---
+# --- 3. Розрахунок аналітики ---
 if analytics and not df_options.empty:
     metrics = analytics.calculate_metrics(
         exp_filter=selected_exp, spot_price=btc_price
@@ -540,7 +558,7 @@ else:
     call_wall, put_wall, weighted_pcr = 66500, 61000, 0.35
 
 
-# --- 4. Карточки Метрик Верхней Панели (7 колонок с PCR) ---
+# --- 4. Карточки метрик верхньої панелі ---
 def render_card(
     label,
     value,
@@ -636,7 +654,7 @@ col7.markdown(
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- 5. Комплексная Баннер-Оценка Рынка (Включает анализ движения цены за сегодня и все факторы) ---
+# --- 5. Комплексна оцінка ринку ---
 manipulation_status = "в норме. Баланс сил адекватный."
 status_color = "#00E676"
 status_title = "Бычий режим (Bullish / Low Volatility)"
@@ -884,7 +902,7 @@ with tab_main:
         },
     )
 
-# ==================== TAB 2: АНАЛИТИКА НА 1 ДЕНЬ (0DTE/1DTE) ====================
+# ==================== TAB 2: АНАЛІТИКА НА 1 ДЕНЬ (0DTE/1DTE) ====================
 with tab_1day:
     st.subheader("⚡ 1-Day Intraday Liquidity & Expected Move")
 
