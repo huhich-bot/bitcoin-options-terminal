@@ -113,7 +113,7 @@ st.markdown(
         background: linear-gradient(145deg, #161b26 0%, #0e1117 100%);
         border: 1px solid #212638;
         border-radius: 10px;
-        padding: 12px 16px;
+        padding: 10px 12px;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
         transition: transform 0.2s ease, border-color 0.2s ease;
         position: relative;
@@ -124,19 +124,19 @@ st.markdown(
         transform: translateY(-2px);
     }
     .metric-label {
-        font-size: 11px;
+        font-size: 10.5px;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.8px;
+        letter-spacing: 0.6px;
         color: #8b949e;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
         display: flex;
         align-items: center;
         justify-content: space-between;
     }
     .metric-value {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 20px;
+        font-size: 17px;
         font-weight: 700;
         line-height: 1.2;
     }
@@ -148,7 +148,7 @@ st.markdown(
     }
     .tooltip-icon {
         cursor: help;
-        font-size: 12px;
+        font-size: 11px;
         color: #6b7280;
         margin-left: 4px;
         transition: color 0.2s;
@@ -259,7 +259,6 @@ def fetch_cvd_delta():
 
 @st.cache_data(ttl=300)
 def load_candles(tf_label, current_btc_price):
-    # Використовуємо Yahoo Finance API (працює стабільно в хмарі без блокувань і дає глибоку історію)
     yf_params = {
         "15 мин (3 дня)": ("15m", "60d"),
         "1 час (14 дней)": ("1h", "730d"),
@@ -292,7 +291,6 @@ def load_candles(tf_label, current_btc_price):
 
         df = df.dropna().sort_values("timestamp").reset_index(drop=True)
 
-        # Ресемплинг годинних свічок в 4-годинні для максимальної історії
         if tf_label == "4 часа (3 месяца)" and not df.empty:
             df.set_index("timestamp", inplace=True)
             df = (
@@ -312,7 +310,6 @@ def load_candles(tf_label, current_btc_price):
     except Exception:
         pass
 
-    # Фоллбек генератор на випадок збою мережі
     limit = 500
     np.random.seed(42)
     now = pd.Timestamp.now()
@@ -521,7 +518,7 @@ else:
     call_wall, put_wall, weighted_pcr = 66500, 61000, 0.35
 
 
-# --- 4. Карточки Метрик Верхней Панели ---
+# --- 4. Карточки Метрик Верхней Панели (7 колонок с PCR) ---
 def render_card(
     label,
     value,
@@ -539,7 +536,7 @@ def render_card(
     return f'<div class="metric-card" style="border-left: 3px solid {border_accent};"><div class="metric-label"><span>{label}</span>{tooltip_html}</div><div class="metric-value" style="color: {value_color};">{value}</div></div>'
 
 
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 gex_color = "#00E676" if net_gex >= 0 else "#FF5252"
 gex_sign = "+" if net_gex > 0 else ""
 
@@ -584,6 +581,16 @@ col4.markdown(
 )
 col5.markdown(
     render_card(
+        "Weighted PCR",
+        f"{weighted_pcr:.2f}",
+        value_color="#38BDF8",
+        border_accent="#38BDF8",
+        help_text="Put/Call Ratio. Значения ниже 0.7 указывают на преобладание коллов (бычий настрой), выше 1.0 — на рост защитных путов.",
+    ),
+    unsafe_allow_html=True,
+)
+col6.markdown(
+    render_card(
         "25D Skew",
         f"{skew_25d:+.2f}%",
         value_color="#38BDF8",
@@ -594,43 +601,47 @@ col5.markdown(
 )
 
 cvd_html = f"<span style='color:#00E676;'>{spot_delta_usd:+.1f}M</span> / <span style='color:#FF5252;'>{futures_delta_usd:+.1f}M</span>"
-col6.markdown(
+col7.markdown(
     render_card(
         "Spot / Fut CVD",
         cvd_html,
         value_color="#FFFFFF",
         border_accent="#38BDF8",
-        help_text="Разница объемов рыночных покупок/продаж. Позволяет выявлять ловушки (например, рост на фьючерсах при сливе спота).",
+        help_text="Разница объемов рыночных покупок/продаж за последние часы. Показывает реальное распределение или агрессивный разгон.",
     ),
     unsafe_allow_html=True,
 )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- 5. Динамическая Баннер-Оценка Рынка ---
-manipulation_status = "в норме. Агрессивных манипуляций не выявлено."
+# --- 5. Комплексная Баннер-Оценка Рынка (Включает анализ движения цены за сегодня и все факторы) ---
+manipulation_status = "в норме. Баланс сил адекватный."
+status_color = "#00E676"
+status_title = "Бычий режим (Bullish / Low Volatility)"
+
 if spot_delta_usd < -3.0 and futures_delta_usd > 3.0:
-    manipulation_status = "🚨 БЫЧЬЯ ЛОВУШКА! Фьючерсы разгоняют, а Спот сливает!"
+    manipulation_status = "🚨 БЫЧЬЯ ЛОВУШКА (Bull Trap)! Фьючерсы искусственно разгоняли вверх, в то время как на Споте шло активное распределение (продажи), что и спровоцировало сегодняшнее падение цены."
+    status_color = "#FF5252"
+    status_title = "Локальная ловушка / Давление продавцов"
 elif spot_delta_usd > 3.0 and futures_delta_usd < -3.0:
     manipulation_status = (
-        "🛡️ МЕДВЕЖЬЯ ЛОВУШКА! Фьючерсы давят вниз, но Спот выкупает!"
+        "🛡️ МЕДВЕЖЬЯ ЛОВУШКА (Bear Trap)! Фьючерсы давили вниз, но Спот уверенно выкупали."
     )
+    status_color = "#00E676"
+    status_title = "Скрытый Накопительный Выкуп"
+elif net_gex < 0:
+    status_title = "Отрицательная гамма (High Volatility Regime)"
+    status_color = "#FFB300"
+    manipulation_status = "Рынок находится в зоне отрицательного GEX, что усиливает импульсные движения и резкие проливы при пробое поддержек."
 
 reasons = [
-    f"<b>Long Gamma (+${net_gex:.1f}M):</b> Маркетмейкеры гасят волатильность. Рынок склонен к флэту и возврату к среднему.",
-    f"<b>Net Vanna Exposure (+${vanna_exp:.1f}M / 1% IV):</b> При скачке волатильности ММ вынуждены покупать фьючерсы.",
-    f"<b>25D Skew (+{skew_25d:.2f}%):</b> Повышенный страх — киты скупают Put-страховку.",
-    f"<b>Цена (${btc_price:,.0f}) выше Vol Trigger (${gamma_flip:,.0f})</b> — зона низкого импульсного риска.",
-    f"<b>Цена (${btc_price:,.0f}) ниже Max Pain (${max_pain:,.0f})</b> — магнетический вектор вверх к экспирации.",
-    f"🔍 <b>ФИЛЬТР МАНИПУЛЯЦИЙ:</b> CVD Спота (<b>{spot_delta_usd:+.1f}M$</b>) и Фьючерсов (<b>{futures_delta_usd:+.1f}M$</b>) — {manipulation_status}",
+    f"📉 <b>ДИНАМИКА ЦЕНЫ ЗА СЕГОДНЯ:</b> Цена испытала снижение до уровня <b>${btc_price:,.1f}</b>. Анализ CVD показывает: Спот-дельта составляет <b>{spot_delta_usd:+.1f}M$</b>, а фьючерсная — <b>{futures_delta_usd:+.1f}M$</b>. {manipulation_status}",
+    f"<b>Net GEX (${net_gex:.1f}M):</b> Отражает текущую ликвидность маркетмейкеров. При отрицательных значениях или сильном дисбалансе дельты демпфирование волатильности ослабевает.",
+    f"<b>Weighted PCR ({weighted_pcr:.2f}) & Skew ({skew_25d:+.2f}%):</b> Оценивают перекос участников. Соотношение опционов и перекос волатильности сигнализируют о защитной активности крупных игроков.",
+    f"<b>Положение относительно уровней:</b> Цена тестирует зоны между Put Wall (<b>${put_wall:,.0f}</b>) и Call Wall (<b>${call_wall:,.0f}</b>), стремясь к магниту Max Pain (<b>${max_pain:,.0f}</b>).",
+    f"<b>Ставка финансирования (Funding APR):</b> Текущая ставка и базис фьючерса указывают на степень перегрева плечей, влияющую на силу импульса.",
 ]
 
-status_title = (
-    "Бычий режим (Bullish / Low Volatility)"
-    if net_gex >= 0
-    else "Нейтральный Флэт (Range Bound)"
-)
-status_color = "#00E676" if net_gex >= 0 else "#FFB300"
 reasons_html = "".join(
     [f"<li style='margin-bottom: 6px;'>{r}</li>" for r in reasons]
 )
@@ -639,7 +650,7 @@ st.markdown(
     f"""
     <div style="background: linear-gradient(135deg, #121824 0%, #0b0e14 100%); border-left: 5px solid {status_color}; border-radius: 10px; padding: 18px 22px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); margin-bottom: 20px;">
         <h3 style="margin-top: 0; margin-bottom: 12px; color: {status_color}; font-size: 18px; font-weight: 700;">
-            Оценка рынка ({selected_exp}): {status_title}
+            Комплексный анализ рынка ({selected_exp}): {status_title}
         </h3>
         <ul style="margin-bottom: 0; padding-left: 20px; color: #d1d4dc; font-size: 13.5px; line-height: 1.5;">
             {reasons_html}
