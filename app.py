@@ -1,10 +1,10 @@
+import re
 from analytics.options import OptionAnalytics
 from api.deribit import DeribitAPI
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import re
 import requests
 import streamlit as st
 
@@ -210,50 +210,72 @@ def load_data():
     return btc_price, df_options
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=15)
 def fetch_funding_and_basis(current_btc_price):
     fut_price = current_btc_price
     funding_8h = 0.01
+
+    # 1. Запит до Bybit API
     try:
-        res = requests.get(
-            "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT",
-            timeout=3,
-        ).json()
-        if "markPrice" in res and "lastFundingRate" in res:
-            fut_price = float(res["markPrice"])
-            funding_8h = float(res["lastFundingRate"]) * 100
+        url = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
+        res = requests.get(url, timeout=3).json()
+        result = res.get("result", {}).get("list", [])[0]
+        fut_price = float(result.get("markPrice", current_btc_price))
+        funding_8h = float(result.get("fundingRate", 0.0001)) * 100
+        return fut_price, funding_8h
     except Exception:
-        try:
-            fut_data = api.get_futures_ticker("BTC-PERPETUAL")
-            if isinstance(fut_data, dict):
-                fut_price = fut_data.get("mark_price", current_btc_price)
-                funding_8h = fut_data.get("funding_8h", 0.01) * 100
-        except Exception:
-            pass
+        pass
+
+    # 2. Резервний запит до Deribit API
+    try:
+        fut_data = api.get_futures_ticker("BTC-PERPETUAL")
+        if isinstance(fut_data, dict):
+            fut_price = fut_data.get("mark_price", current_btc_price)
+            funding_8h = fut_data.get("funding_8h", 0.01) * 100
+    except Exception:
+        pass
+
     return fut_price, funding_8h
 
 
-@st.cache_data(ttl=180)
+@st.cache_data(ttl=15)
 def fetch_cvd_delta():
-    spot_delta_usd, futures_delta_usd = 7.2, -101.6
+    spot_delta_usd, futures_delta_usd = 0.0, 0.0
+
     try:
-        url_spot = (
-            "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=4"
-        )
+        # Spot CVD (Bybit Spot API)
+        url_spot = "https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60&limit=4"
         res_s = requests.get(url_spot, timeout=3).json()
-        s_buy = sum([float(k[9]) * float(k[4]) for k in res_s])
-        s_tot = sum([float(k[5]) * float(k[4]) for k in res_s])
+        list_s = res_s.get("result", {}).get("list", [])
+
+        s_buy, s_tot = 0.0, 0.0
+        for k in list_s:
+            open_p = float(k[1])
+            close_p = float(k[4])
+            turnover = float(k[6])
+            s_tot += turnover
+            if close_p >= open_p:
+                s_buy += turnover
         spot_delta_usd = (2 * s_buy - s_tot) / 1e6
 
-        url_fut = (
-            "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1h&limit=4"
-        )
+        # Futures CVD (Bybit Linear API)
+        url_fut = "https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=60&limit=4"
         res_f = requests.get(url_fut, timeout=3).json()
-        f_buy = sum([float(k[9]) * float(k[4]) for k in res_f])
-        f_tot = sum([float(k[5]) * float(k[4]) for k in res_f])
+        list_f = res_f.get("result", {}).get("list", [])
+
+        f_buy, f_tot = 0.0, 0.0
+        for k in list_f:
+            open_p = float(k[1])
+            close_p = float(k[4])
+            turnover = float(k[6])
+            f_tot += turnover
+            if close_p >= open_p:
+                f_buy += turnover
         futures_delta_usd = (2 * f_buy - f_tot) / 1e6
+
     except Exception:
         pass
+
     return spot_delta_usd, futures_delta_usd
 
 
