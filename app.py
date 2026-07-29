@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Принудительная темная тема и полная стилизация (Main + Sidebar) ---
+# --- Принудительная темная тема и полная стилизация (Main + Sidebar + Tooltips) ---
 st.markdown(
     """
 <style>
@@ -107,7 +107,7 @@ st.markdown(
         border-bottom: 2px solid #38bdf8 !important;
     }
 
-    /* --- СТИЛИЗАЦИЯ КАРТОЧЕК МЕТРИК --- */
+    /* --- СТИЛИЗАЦИЯ КАРТОЧЕК МЕТРИК И ПОДКАЗОК (TOOLTIPS) --- */
     .metric-card {
         background: linear-gradient(145deg, #161b26 0%, #0e1117 100%);
         border: 1px solid #212638;
@@ -115,6 +115,8 @@ st.markdown(
         padding: 12px 16px;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
         transition: transform 0.2s ease, border-color 0.2s ease;
+        position: relative;
+        overflow: visible !important;
     }
     .metric-card:hover {
         border-color: #38bdf8;
@@ -127,12 +129,59 @@ st.markdown(
         letter-spacing: 0.8px;
         color: #8b949e;
         margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
     }
     .metric-value {
         font-family: 'JetBrains Mono', monospace;
         font-size: 20px;
         font-weight: 700;
         line-height: 1.2;
+    }
+
+    /* CSS Tooltip (Появляется СВЕРХУ карточки) */
+    .tooltip-box {
+        position: relative;
+        display: inline-block;
+    }
+    .tooltip-icon {
+        cursor: help;
+        font-size: 12px;
+        color: #6b7280;
+        margin-left: 4px;
+        transition: color 0.2s;
+    }
+    .tooltip-icon:hover {
+        color: #38bdf8;
+    }
+    .tooltip-box .tooltiptext {
+        visibility: hidden;
+        width: 280px;
+        background-color: #121722;
+        color: #d1d4dc;
+        text-align: left;
+        border-radius: 8px;
+        padding: 10px 12px;
+        position: absolute;
+        z-index: 99999;
+        bottom: 135%;
+        top: auto;
+        right: 0;
+        left: auto;
+        opacity: 0;
+        transition: opacity 0.2s ease-in-out, visibility 0.2s;
+        border: 1px solid #2a3447;
+        font-size: 11.5px;
+        font-weight: 400;
+        text-transform: none;
+        box-shadow: 0 -8px 24px rgba(0,0,0,0.8);
+        line-height: 1.45;
+        letter-spacing: normal;
+    }
+    .tooltip-box:hover .tooltiptext {
+        visibility: visible;
+        opacity: 1;
     }
 </style>
 """,
@@ -284,13 +333,9 @@ else:
 
 
 # --- 4. Карточки Метрик Верхней Панели ---
-def render_card(label, value, value_color="#FFFFFF", border_accent="#212638"):
-    return f"""
-    <div class="metric-card" style="border-left: 3px solid {border_accent};">
-        <div class="metric-label">{label}</div>
-        <div class="metric-value" style="color: {value_color};">{value}</div>
-    </div>
-    """
+def render_card(label, value, value_color="#FFFFFF", border_accent="#212638", help_text=None):
+    tooltip_html = f'<div class="tooltip-box"><span class="tooltip-icon">❓</span><span class="tooltiptext">{help_text}</span></div>' if help_text else ""
+    return f'<div class="metric-card" style="border-left: 3px solid {border_accent};"><div class="metric-label"><span>{label}</span>{tooltip_html}</div><div class="metric-value" style="color: {value_color};">{value}</div></div>'
 
 
 col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -306,12 +351,14 @@ col1.markdown(
     ),
     unsafe_allow_html=True,
 )
+
 col2.markdown(
     render_card(
         "Max Pain",
         f"${max_pain:,.0f}",
         value_color="#C084FC",
         border_accent="#C084FC",
+        help_text="Уровень цены, при котором покупатели опционов несут максимальные убытки к экспирации. Цена притягивается к этому уровню.",
     ),
     unsafe_allow_html=True,
 )
@@ -321,6 +368,7 @@ col3.markdown(
         f"{gex_sign}${net_gex:.1f}M",
         value_color=gex_color,
         border_accent=gex_color,
+        help_text="Суммарный гамма-риск маркетмейкеров. Положительный GEX гасит волатильность (флэт), отрицательный — усиливает дампы/пампы.",
     ),
     unsafe_allow_html=True,
 )
@@ -330,6 +378,7 @@ col4.markdown(
         f"${gamma_flip:,.0f}",
         value_color="#FFA726",
         border_accent="#FFA726",
+        help_text="Уровень Gamma Flip. Выше него рынок стабилен, ниже — маркетмейкеры начинают торговать по тренду, разгоняя волатильность.",
     ),
     unsafe_allow_html=True,
 )
@@ -339,6 +388,7 @@ col5.markdown(
         f"{skew_25d:+.2f}%",
         value_color="#38BDF8",
         border_accent="#38BDF8",
+        help_text="Перекос волатильности между Put и Call опционами. Положительный Skew показывает повышенный страх и скупку страховки.",
     ),
     unsafe_allow_html=True,
 )
@@ -350,6 +400,7 @@ col6.markdown(
         cvd_html,
         value_color="#FFFFFF",
         border_accent="#38BDF8",
+        help_text="Разница объемов рыночных покупок/продаж. Позволяет выявлять ловушки (например, рост на фьючерсах при сливе спота).",
     ),
     unsafe_allow_html=True,
 )
@@ -414,7 +465,6 @@ tab_main, tab_1day, tab_whales, tab_basis = st.tabs(
 with tab_main:
     df_candles = load_candles(selected_tf)
 
-    # Увеличен параметр ширины правой колонки с 0.22 до 0.35 для крупного отображения гистограммы
     fig = make_subplots(
         rows=1,
         cols=2,
@@ -603,7 +653,6 @@ with tab_main:
 with tab_1day:
     st.subheader("⚡ 1-Day Intraday Liquidity & Expected Move")
 
-    # Расчет ожидаемого 1-дневного диапазона (Expected Move)
     implied_vol_pct = max(abs(skew_25d) + 50.0, 30.0)
     expected_1d_move = btc_price * (implied_vol_pct / 100.0) / np.sqrt(365)
     upper_range = btc_price + expected_1d_move
@@ -616,6 +665,7 @@ with tab_1day:
             f"±${expected_1d_move:,.0f}",
             value_color="#38BDF8",
             border_accent="#38BDF8",
+            help_text="Ожидаемое математическое отклонение цены BTC за 24 часа на основе волатильности опционов.",
         ),
         unsafe_allow_html=True,
     )
@@ -625,6 +675,7 @@ with tab_1day:
             f"${upper_range:,.0f}",
             value_color="#00E676",
             border_accent="#00E676",
+            help_text="Верхняя граница расчетного 1-дневного диапазона волатильности.",
         ),
         unsafe_allow_html=True,
     )
@@ -634,6 +685,7 @@ with tab_1day:
             f"${lower_range:,.0f}",
             value_color="#FF5252",
             border_accent="#FF5252",
+            help_text="Нижняя граница расчетного 1-дневного диапазона волатильности.",
         ),
         unsafe_allow_html=True,
     )
@@ -643,6 +695,7 @@ with tab_1day:
             f"${charm_exp:+.2f}M / день",
             value_color="#FFA726",
             border_accent="#FFA726",
+            help_text="Скорость изменения дельты со временем. Во флэте ММ вынуждены сглаживать цену к Max Pain.",
         ),
         unsafe_allow_html=True,
     )
@@ -700,6 +753,7 @@ with tab_basis:
     funding_annual = funding_8h * 3 * 365.0
 
     b1, b2, b3 = st.columns(3)
+
     b1.markdown(
         render_card(
             "Futures Mark Price",
@@ -715,6 +769,7 @@ with tab_basis:
             f"${basis_abs:+.1f} ({basis_pct:+.2f}%)",
             value_color="#00E676" if basis_abs >= 0 else "#FF5252",
             border_accent="#00E676",
+            help_text="Разница цен между бессрочным фьючерсом и спотом. Премия показывает бычий перекос, дисконт — медвежий.",
         ),
         unsafe_allow_html=True,
     )
@@ -724,6 +779,7 @@ with tab_basis:
             f"{funding_8h:+.4f}% / {funding_annual:+.1f}%",
             value_color="#38BDF8",
             border_accent="#38BDF8",
+            help_text="Ставка финансирования бессрочных контрактов. Высокий фандинг сигнализирует о перегреве плечей и рисках сквиза.",
         ),
         unsafe_allow_html=True,
     )
