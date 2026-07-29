@@ -259,50 +259,75 @@ def fetch_cvd_delta():
 
 @st.cache_data(ttl=300)
 def load_candles(tf_label, current_btc_price):
-    tf_map_cb = {
-        "15 мин (3 дня)": 900,
-        "1 час (14 дней)": 3600,
-        "4 часа (3 месяца)": 21600,
-        "1 день (1 год)": 86400,
+    # Використовуємо Yahoo Finance API (працює стабільно в хмарі без блокувань і дає глибоку історію)
+    yf_params = {
+        "15 мин (3 дня)": ("15m", "60d"),
+        "1 час (14 дней)": ("1h", "730d"),
+        "4 часа (3 месяца)": ("1h", "730d"),
+        "1 день (1 год)": ("1d", "max"),
     }
-    granularity = tf_map_cb.get(tf_label, 3600)
+    interval, range_val = yf_params.get(tf_label, ("1h", "730d"))
 
     try:
-        url = f"https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity={granularity}"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval={interval}&range={range_val}"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+        }
         res = requests.get(url, headers=headers, timeout=5).json()
 
-        if isinstance(res, list) and len(res) > 0:
-            df = pd.DataFrame(
-                res,
-                columns=["timestamp", "low", "high", "open", "close", "volume"],
+        result = res["chart"]["result"][0]
+        timestamps = result["timestamp"]
+        quote = result["indicators"]["quote"][0]
+
+        df = pd.DataFrame({
+            "timestamp": pd.to_datetime(timestamps, unit="s"),
+            "open": quote["open"],
+            "high": quote["high"],
+            "low": quote["low"],
+            "close": quote["close"],
+            "volume": quote["volume"],
+        })
+
+        df = df.dropna().sort_values("timestamp").reset_index(drop=True)
+
+        # Ресемплинг годинних свічок в 4-годинні для максимальної історії
+        if tf_label == "4 часа (3 месяца)" and not df.empty:
+            df.set_index("timestamp", inplace=True)
+            df = (
+                df.resample("4h")
+                .agg({
+                    "open": "first",
+                    "high": "max",
+                    "low": "min",
+                    "close": "last",
+                    "volume": "sum",
+                })
+                .dropna()
+                .reset_index()
             )
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-            for col in ["open", "high", "low", "close", "volume"]:
-                df[col] = df[col].astype(float)
-            df = df.sort_values("timestamp").reset_index(drop=True)
-            return df
+
+        return df
     except Exception:
         pass
 
-    limit = 336
+    # Фоллбек генератор на випадок збою мережі
+    limit = 500
     np.random.seed(42)
     now = pd.Timestamp.now()
     dates = pd.date_range(end=now, periods=limit, freq="1h")
     prices = current_btc_price + np.cumsum(
         np.random.normal(0, current_btc_price * 0.002, limit)
     )
-    df = pd.DataFrame(
-        {
-            "timestamp": dates,
-            "open": prices * 0.999,
-            "high": prices * 1.005,
-            "low": prices * 0.995,
-            "close": prices,
-            "volume": np.random.uniform(10, 100, limit),
-        }
-    )
-    return df
+    return pd.DataFrame({
+        "timestamp": dates,
+        "open": prices * 0.999,
+        "high": prices * 1.005,
+        "low": prices * 0.995,
+        "close": prices,
+        "volume": np.random.uniform(10, 100, limit),
+    })
 
 
 btc_price, df_options = load_data()
@@ -336,7 +361,6 @@ exp_notional_str = "Н/Д"
 
 if not df_options.empty:
     try:
-        # Гибкий поиск колонки Open Interest
         oi_col = next(
             (
                 c
@@ -350,11 +374,8 @@ if not df_options.empty:
                 include=[np.number]
             ).columns
             if len(numeric_cols) > 0:
-                oi_col = numeric_cols[
-                    0
-                ]  # фоллбек на первую числовую колонку
+                oi_col = numeric_cols[0]
 
-        # Поиск колонки экспирации или имени инструмента
         exp_col = next(
             (
                 c
@@ -375,7 +396,6 @@ if not df_options.empty:
         )
 
         if selected_exp != "Все":
-            # Расчет времени до экспирации
             exp_dt = pd.to_datetime(
                 selected_exp, format="%d%b%y", errors="coerce"
             )
@@ -391,7 +411,6 @@ if not df_options.empty:
                 else:
                     time_left_str = "Экспирация прошла"
 
-            # Фильтрация и подсчет суммы (OI) для конкретной даты
             sub_df = pd.DataFrame()
             if exp_col and exp_col in df_options.columns:
                 temp_df = df_options.copy()
@@ -533,7 +552,6 @@ col1.markdown(
     ),
     unsafe_allow_html=True,
 )
-
 col2.markdown(
     render_card(
         "Max Pain",
@@ -944,7 +962,7 @@ with tab_basis:
     b2.markdown(
         render_card(
             "Perpetual Basis Spread",
-            f"${basis_abs:+.1f} ({basis_pct:+.2f}%)",
+            f"${basis_abs:,.1f} ({basis_pct:+.2f}%)",
             value_color="#00E676" if basis_abs >= 0 else "#FF5252",
             border_accent="#00E676",
             help_text="Разница цен между бессрочным фьючерсом и спотом. Премия показывает бычий перекос, дисконт — медвежий.",
