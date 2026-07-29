@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import re
 import requests
 import streamlit as st
 
@@ -140,7 +141,7 @@ st.markdown(
         line-height: 1.2;
     }
 
-    /* CSS Tooltip (Появляется СВЕРХУ карточки) */
+    /* CSS Tooltip */
     .tooltip-box {
         position: relative;
         display: inline-block;
@@ -209,6 +210,29 @@ def load_data():
     return btc_price, df_options
 
 
+@st.cache_data(ttl=60)
+def fetch_funding_and_basis(current_btc_price):
+    fut_price = current_btc_price
+    funding_8h = 0.01
+    try:
+        res = requests.get(
+            "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT",
+            timeout=3,
+        ).json()
+        if "markPrice" in res and "lastFundingRate" in res:
+            fut_price = float(res["markPrice"])
+            funding_8h = float(res["lastFundingRate"]) * 100
+    except Exception:
+        try:
+            fut_data = api.get_futures_ticker("BTC-PERPETUAL")
+            if isinstance(fut_data, dict):
+                fut_price = fut_data.get("mark_price", current_btc_price)
+                funding_8h = fut_data.get("funding_8h", 0.01) * 100
+        except Exception:
+            pass
+    return fut_price, funding_8h
+
+
 @st.cache_data(ttl=180)
 def fetch_cvd_delta():
     spot_delta_usd, futures_delta_usd = 7.2, -101.6
@@ -247,9 +271,12 @@ def load_candles(tf_label, current_btc_price):
         url = f"https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity={granularity}"
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get(url, headers=headers, timeout=5).json()
-        
+
         if isinstance(res, list) and len(res) > 0:
-            df = pd.DataFrame(res, columns=["timestamp", "low", "high", "open", "close", "volume"])
+            df = pd.DataFrame(
+                res,
+                columns=["timestamp", "low", "high", "open", "close", "volume"],
+            )
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
             for col in ["open", "high", "low", "close", "volume"]:
                 df[col] = df[col].astype(float)
@@ -279,6 +306,7 @@ def load_candles(tf_label, current_btc_price):
 
 
 btc_price, df_options = load_data()
+fut_price, funding_8h = fetch_funding_and_basis(btc_price)
 spot_delta_usd, futures_delta_usd = fetch_cvd_delta()
 
 # --- 2. Сайдбар ---
@@ -300,6 +328,136 @@ expirations = analytics.get_expirations() if analytics else []
 st.sidebar.header("📅 Фильтр Экспирации")
 selected_exp = st.sidebar.selectbox(
     "Выберите дату экспирации:", ["Все"] + expirations, index=0
+)
+
+# --- Расчет времени до экспирации и суммы (Open Interest) ---
+time_left_str = "Н/Д"
+exp_notional_str = "Н/Д"
+
+if not df_options.empty:
+    try:
+        # Гибкий поиск колонки Open Interest
+        oi_col = next(
+            (
+                c
+                for c in df_options.columns
+                if c.lower() in ["open_interest", "oi", "amount", "size"]
+            ),
+            None,
+        )
+        if not oi_col and len(df_options.columns) > 0:
+            numeric_cols = df_options.select_dtypes(
+                include=[np.number]
+            ).columns
+            if len(numeric_cols) > 0:
+                oi_col = numeric_cols[
+                    0
+                ]  # фоллбек на первую числовую колонку
+
+        # Поиск колонки экспирации или имени инструмента
+        exp_col = next(
+            (
+                c
+                for c in df_options.columns
+                if c.lower() in ["expiration", "expiry", "date"]
+            ),
+            None,
+        )
+        inst_col = next(
+            (
+                c
+                for c in df_options.columns
+                if any(
+                    k in c.lower() for k in ["instrument", "symbol", "name"]
+                )
+            ),
+            None,
+        )
+
+        if selected_exp != "Все":
+            # Расчет времени до экспирации
+            exp_dt = pd.to_datetime(
+                selected_exp, format="%d%b%y", errors="coerce"
+            )
+            if pd.notnull(exp_dt):
+                exp_dt = exp_dt.replace(hour=8, minute=0, second=0)
+                now_utc = pd.Timestamp.now(tz="UTC").tz_localize(None)
+                diff = exp_dt - now_utc
+                total_seconds = diff.total_seconds()
+                if total_seconds > 0:
+                    days = int(total_seconds // 86400)
+                    hours = int((total_seconds % 86400) // 3600)
+                    time_left_str = f"{days} дн. {hours} ч."
+                else:
+                    time_left_str = "Экспирация прошла"
+
+            # Фильтрация и подсчет суммы (OI) для конкретной даты
+            sub_df = pd.DataFrame()
+            if exp_col and exp_col in df_options.columns:
+                temp_df = df_options.copy()
+                try:
+                    temp_df["exp_str"] = (
+                        pd.to_datetime(temp_df[exp_col], errors="coerce")
+                        .dt.strftime("%d%b%y")
+                        .str.upper()
+                    )
+                except Exception:
+                    temp_df["exp_str"] = (
+                        temp_df[exp_col].astype(str).str.upper()
+                    )
+
+                mask = (temp_df["exp_str"] == selected_exp.upper()) | (
+                    temp_df[exp_col].astype(str).str.upper()
+                    == selected_exp.upper()
+                )
+                sub_df = df_options[mask]
+
+            if sub_df.empty and inst_col and inst_col in df_options.columns:
+
+                def extract_exp(name):
+                    m = re.search(r"-(\d{1,2}[A-Z]{3}\d{2})-", str(name))
+                    return m.group(1).upper() if m else ""
+
+                temp_df = df_options.copy()
+                temp_df["exp_extracted"] = temp_df[inst_col].apply(extract_exp)
+                sub_df = temp_df[
+                    temp_df["exp_extracted"] == selected_exp.upper()
+                ]
+
+            if not sub_df.empty and oi_col:
+                total_oi_btc = pd.to_numeric(
+                    sub_df[oi_col], errors="coerce"
+                ).sum()
+                total_oi_usd = total_oi_btc * btc_price
+                exp_notional_str = (
+                    f"{total_oi_btc:,.1f} BTC (${total_oi_usd/1e6:,.1f}M)"
+                )
+            else:
+                exp_notional_str = "0.0 BTC ($0.0M)"
+        else:
+            time_left_str = "Все даты"
+            if oi_col:
+                total_oi_btc = pd.to_numeric(
+                    df_options[oi_col], errors="coerce"
+                ).sum()
+                total_oi_usd = total_oi_btc * btc_price
+                exp_notional_str = (
+                    f"{total_oi_btc:,.1f} BTC (${total_oi_usd/1e6:,.1f}M)"
+                )
+    except Exception:
+        time_left_str = "Н/Д"
+        exp_notional_str = "Н/Д"
+
+st.sidebar.markdown(
+    f"""
+    <div style="background: #141923; padding: 10px; border-radius: 6px; border: 1px solid #222b3c; margin-bottom: 10px;">
+        <div style="font-size: 11px; color: #8b949e;">⏳ Время до экспирации:</div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: #38bdf8; margin-bottom: 6px;">{time_left_str}</div>
+        <div style="font-size: 11px; color: #8b949e;">📊 Сумма (OI) экспирации:</div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #00E676;">{exp_notional_str}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 st.sidebar.header("📊 Режим справа от графика")
@@ -345,8 +503,20 @@ else:
 
 
 # --- 4. Карточки Метрик Верхней Панели ---
-def render_card(label, value, value_color="#FFFFFF", border_accent="#212638", help_text=None):
-    tooltip_html = f'<div class="tooltip-box"><span class="tooltip-icon">❓</span><span class="tooltiptext">{help_text}</span></div>' if help_text else ""
+def render_card(
+    label,
+    value,
+    value_color="#FFFFFF",
+    border_accent="#212638",
+    help_text=None,
+):
+    tooltip_html = (
+        f'<div class="tooltip-box"><span'
+        f' class="tooltip-icon">❓</span><span'
+        f' class="tooltiptext">{help_text}</span></div>'
+        if help_text
+        else ""
+    )
     return f'<div class="metric-card" style="border-left: 3px solid {border_accent};"><div class="metric-label"><span>{label}</span>{tooltip_html}</div><div class="metric-value" style="color: {value_color};">{value}</div></div>'
 
 
@@ -422,9 +592,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 # --- 5. Динамическая Баннер-Оценка Рынка ---
 manipulation_status = "в норме. Агрессивных манипуляций не выявлено."
 if spot_delta_usd < -3.0 and futures_delta_usd > 3.0:
-    manipulation_status = (
-        "🚨 БЫЧЬЯ ЛОВУШКА! Фьючерсы разгоняют, а Спот сливает!"
-    )
+    manipulation_status = "🚨 БЫЧЬЯ ЛОВУШКА! Фьючерсы разгоняют, а Спот сливает!"
 elif spot_delta_usd > 3.0 and futures_delta_usd < -3.0:
     manipulation_status = (
         "🛡️ МЕДВЕЖЬЯ ЛОВУШКА! Фьючерсы давят вниз, но Спот выкупает!"
@@ -758,14 +926,8 @@ with tab_whales:
 with tab_basis:
     st.subheader("📈 Annualized Basis Yield & Market Sentiment")
 
-    fut_data = api.get_futures_ticker("BTC-PERPETUAL")
-    fut_price = (
-        fut_data["mark_price"] if fut_data["mark_price"] > 0 else btc_price
-    )
-
     basis_abs = fut_price - btc_price
     basis_pct = (basis_abs / btc_price) * 100 if btc_price > 0 else 0.0
-    funding_8h = fut_data["funding_8h"]
     funding_annual = funding_8h * 3 * 365.0
 
     b1, b2, b3 = st.columns(3)
