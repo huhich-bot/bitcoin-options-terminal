@@ -9,18 +9,18 @@ class DeribitAPI:
         self.base_url = "https://www.deribit.com/api/v2"
 
     def get_btc_price(self) -> float:
-        """Получение текущей спотовой цены BTC."""
+        """Отримання поточної спотової ціни BTC."""
         try:
             url = f"{self.base_url}/public/get_index_price"
             params = {"index_name": "btc_usd"}
             res = requests.get(url, params=params, timeout=10).json()
             return float(res.get("result", {}).get("index_price", 0.0))
         except Exception as e:
-            print(f"Ошибка при получении цены BTC: {e}")
+            print(f"Помилка при отриманні ціни BTC: {e}")
             return 0.0
 
     def get_options_book(self, currency: str = "BTC") -> pd.DataFrame:
-        """Получение книги опционов (Open Interest, IV, Strike и т.д.)."""
+        """Отримання книги опціонів (Open Interest, IV, Strike тощо)."""
         try:
             url = f"{self.base_url}/public/get_book_summary_by_currency"
             params = {"currency": currency, "kind": "option"}
@@ -68,13 +68,13 @@ class DeribitAPI:
 
             return pd.DataFrame(data)
         except Exception as e:
-            print(f"Ошибка при получении опционов: {e}")
+            print(f"Помилка при отриманні опціонів: {e}")
             return pd.DataFrame()
 
     def get_block_trades(
         self, currency: str = "BTC", min_usd_val: float = 50000.0
     ) -> pd.DataFrame:
-        """Получение крупных сделок (Block Trades / OTC) китов с Deribit."""
+        """Отримання великих угод (Block Trades / OTC) з Deribit."""
         try:
             url = f"{self.base_url}/public/get_last_trades_by_currency"
             params = {"currency": currency, "kind": "option", "count": 100}
@@ -116,13 +116,13 @@ class DeribitAPI:
 
             return pd.DataFrame(data)
         except Exception as e:
-            print(f"Ошибка при получении Block Trades: {e}")
+            print(f"Помилка при отриманні Block Trades: {e}")
             return pd.DataFrame()
 
     def get_futures_ticker(
         self, instrument_name: str = "BTC-PERPETUAL"
     ) -> dict:
-        """Получение тикера фьючерса для Basis & Funding."""
+        """Отримання тікера ф'ючерсу для Basis & Funding."""
         try:
             url = f"{self.base_url}/public/ticker"
             params = {"instrument_name": instrument_name}
@@ -137,6 +137,6 @@ class DeribitAPI:
                     * 100.0,
                 }
         except Exception as e:
-            print(f"Ошибка при получении фьючерсного тикера: {e}")
+            print(f"Помилка при отриманні ф'ючерсного тікера: {e}")
 
         return {"mark_price": 0.0, "index_price": 0.0, "funding_8h": 0.0}
