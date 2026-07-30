@@ -14,7 +14,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Примусова темна тема та стилізація (Main + Sidebar + Tooltips) ---
+# --- Принудительная темная тема и стилизация (Main + Sidebar + Tooltips) ---
 st.markdown(
     """
 <style>
@@ -26,7 +26,7 @@ st.markdown(
         font-family: 'Inter', sans-serif;
     }
     
-    /* --- СТИЛІЗАЦІЯ САЙДБАРА --- */
+    /* --- СТИЛИЗАЦИЯ САЙДБАРА --- */
     section[data-testid="stSidebar"] {
         background-color: #0e1117 !important;
         border-right: 1px solid #1e2430 !important;
@@ -77,7 +77,7 @@ st.markdown(
         border-color: #38bdf8;
     }
     
-    /* Кнопка оновлення */
+    /* Кнопка обновления */
     section[data-testid="stSidebar"] .stButton > button {
         background: linear-gradient(145deg, #1a2333 0%, #101622 100%) !important;
         color: #38bdf8 !important;
@@ -95,7 +95,7 @@ st.markdown(
         box-shadow: 0 0 15px rgba(56, 189, 248, 0.5) !important;
     }
 
-    /* --- СТИЛІЗАЦІЯ ВКЛАДОК (TABS) --- */
+    /* --- СТИЛИЗАЦИЯ ВКЛАДОК (TABS) --- */
     button[data-baseweb="tab"] {
         background-color: transparent !important;
         color: #8b949e !important;
@@ -108,7 +108,7 @@ st.markdown(
         border-bottom: 2px solid #38bdf8 !important;
     }
 
-    /* --- СТИЛІЗАЦІЯ КАРТОЧОК МЕТРИК ТА ПІДКАЗОК (TOOLTIPS) --- */
+    /* --- СТИЛИЗАЦИЯ КАРТОЧЕК МЕТРИК И ПОДСКАЗОК (TOOLTIPS) --- */
     .metric-card {
         background: linear-gradient(145deg, #161b26 0%, #0e1117 100%);
         border: 1px solid #212638;
@@ -191,7 +191,7 @@ st.markdown(
 
 st.title("₿ BTC Options & Derivatives Institutional Terminal")
 
-# --- 1. Ініціалізація та завантаження даних ---
+# --- 1. Инициализация и загрузка данных ---
 api = DeribitAPI()
 
 
@@ -216,7 +216,6 @@ def fetch_funding_and_basis(current_btc_price):
     funding_8h = 0.01
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    # Вхід через дзеркало api.bytick.com (не блокується AWS/Streamlit)
     urls = [
         "https://api.bytick.com/v5/market/tickers?category=linear&symbol=BTCUSDT",
         "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT",
@@ -241,7 +240,6 @@ def fetch_funding_and_basis(current_btc_price):
         except Exception:
             continue
 
-    # Резервний запит до Deribit API
     try:
         fut_data = api.get_futures_ticker("BTC-PERPETUAL")
         if isinstance(fut_data, dict):
@@ -259,11 +257,11 @@ def fetch_cvd_delta():
     spot_delta_usd, futures_delta_usd = 0.0, 0.0
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    # 1. Spot CVD (Bybit через api.bytick.com)
+    # ---------------- 1. SPOT CVD ----------------
     for domain in ["api.bytick.com", "api.bybit.com"]:
         try:
             url_spot = f"https://{domain}/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60&limit=4"
-            res = requests.get(url_spot, headers=headers, timeout=5)
+            res = requests.get(url_spot, headers=headers, timeout=4)
             if res.status_code == 200:
                 data = res.json()
                 list_s = (data.get("result") or {}).get("list", [])
@@ -272,21 +270,39 @@ def fetch_cvd_delta():
                     for k in list_s:
                         open_p = float(k[1])
                         close_p = float(k[4])
-                        turnover = float(k[6])
+                        turnover = float(k[6]) if len(k) > 6 and float(k[6]) > 0 else float(k[5]) * float(k[4])
                         s_tot += turnover
                         if close_p >= open_p:
                             s_buy += turnover
                     if s_tot > 0:
                         spot_delta_usd = (2 * s_buy - s_tot) / 1e6
-                    break
+                        break
         except Exception:
             continue
 
-    # 2. Futures CVD (Bybit через api.bytick.com)
+    if spot_delta_usd == 0.0:
+        try:
+            url_bin = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=4"
+            res = requests.get(url_bin, headers=headers, timeout=4).json()
+            if isinstance(res, list) and len(res) > 0:
+                s_buy, s_tot = 0.0, 0.0
+                for k in res:
+                    open_p, close_p = float(k[1]), float(k[4])
+                    turnover = float(k[7])
+                    s_tot += turnover
+                    if close_p >= open_p:
+                        s_buy += turnover
+                if s_tot > 0:
+                    spot_delta_usd = (2 * s_buy - s_tot) / 1e6
+        except Exception:
+            pass
+
+    # ---------------- 2. FUTURES CVD ----------------
+    # Попытка 1: Bybit Linear (через зеркало и основной домен)
     for domain in ["api.bytick.com", "api.bybit.com"]:
         try:
             url_fut = f"https://{domain}/v5/market/kline?category=linear&symbol=BTCUSDT&interval=60&limit=4"
-            res = requests.get(url_fut, headers=headers, timeout=5)
+            res = requests.get(url_fut, headers=headers, timeout=4)
             if res.status_code == 200:
                 data = res.json()
                 list_f = (data.get("result") or {}).get("list", [])
@@ -295,46 +311,50 @@ def fetch_cvd_delta():
                     for k in list_f:
                         open_p = float(k[1])
                         close_p = float(k[4])
-                        turnover = float(k[6])
+                        turnover = float(k[6]) if len(k) > 6 and float(k[6]) > 0 else float(k[5]) * float(k[4])
                         f_tot += turnover
                         if close_p >= open_p:
                             f_buy += turnover
                     if f_tot > 0:
                         futures_delta_usd = (2 * f_buy - f_tot) / 1e6
-                    break
+                        break
         except Exception:
             continue
 
-    # 3. Резервний запит до OKX (якщо Bybit не відповів)
-    if spot_delta_usd == 0.0:
+    # Попытка 2: Binance Futures (если Bybit заблокирован)
+    if futures_delta_usd == 0.0:
         try:
-            url_okx = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=1H&limit=4"
-            res = requests.get(url_okx, headers=headers, timeout=5).json()
-            candles = res.get("data", [])
-            s_buy, s_tot = 0.0, 0.0
-            for c in candles:
-                open_p, close_p, vol_usd = float(c[1]), float(c[4]), float(c[6])
-                s_tot += vol_usd
-                if close_p >= open_p:
-                    s_buy += vol_usd
-            if s_tot > 0:
-                spot_delta_usd = (2 * s_buy - s_tot) / 1e6
+            url_fapi = "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1h&limit=4"
+            res = requests.get(url_fapi, headers=headers, timeout=4).json()
+            if isinstance(res, list) and len(res) > 0:
+                f_buy, f_tot = 0.0, 0.0
+                for k in res:
+                    open_p, close_p = float(k[1]), float(k[4])
+                    turnover = float(k[7])
+                    f_tot += turnover
+                    if close_p >= open_p:
+                        f_buy += turnover
+                if f_tot > 0:
+                    futures_delta_usd = (2 * f_buy - f_tot) / 1e6
         except Exception:
             pass
 
+    # Попытка 3: OKX Swap (резервный источник)
     if futures_delta_usd == 0.0:
         try:
             url_okx_fut = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=1H&limit=4"
-            res = requests.get(url_okx_fut, headers=headers, timeout=5).json()
+            res = requests.get(url_okx_fut, headers=headers, timeout=4).json()
             candles = res.get("data", [])
-            f_buy, f_tot = 0.0, 0.0
-            for c in candles:
-                open_p, close_p, vol_usd = float(c[1]), float(c[4]), float(c[6])
-                f_tot += vol_usd
-                if close_p >= open_p:
-                    f_buy += vol_usd
-            if f_tot > 0:
-                futures_delta_usd = (2 * f_buy - f_tot) / 1e6
+            if candles:
+                f_buy, f_tot = 0.0, 0.0
+                for c in candles:
+                    open_p, close_p = float(c[1]), float(c[4])
+                    vol_usd = float(c[7]) if len(c) > 7 and float(c[7]) > 0 else float(c[5]) * float(c[4])
+                    f_tot += vol_usd
+                    if close_p >= open_p:
+                        f_buy += vol_usd
+                if f_tot > 0:
+                    futures_delta_usd = (2 * f_buy - f_tot) / 1e6
         except Exception:
             pass
 
@@ -416,9 +436,9 @@ fut_price, funding_8h = fetch_funding_and_basis(btc_price)
 spot_delta_usd, futures_delta_usd = fetch_cvd_delta()
 
 # --- 2. Сайдбар ---
-st.sidebar.header("⚙️ Налаштування")
+st.sidebar.header("⚙️ Настройки")
 selected_tf = st.sidebar.selectbox(
-    "Таймфрейм графіка",
+    "Таймфрейм графика",
     [
         "15 мин (3 дня)",
         "1 час (14 дней)",
@@ -431,12 +451,12 @@ selected_tf = st.sidebar.selectbox(
 analytics = OptionAnalytics(df_options) if not df_options.empty else None
 expirations = analytics.get_expirations() if analytics else []
 
-st.sidebar.header("📅 Фільтр Експірації")
+st.sidebar.header("📅 Фильтр Экспирации")
 selected_exp = st.sidebar.selectbox(
-    "Оберіть дату експірації:", ["Все"] + expirations, index=0
+    "Выберите дату экспирации:", ["Все"] + expirations, index=0
 )
 
-# --- Розрахунок часу до експірації та суми (Open Interest) ---
+# --- Расчет времени до экспирации и суммы (Open Interest) ---
 time_left_str = "Н/Д"
 exp_notional_str = "Н/Д"
 
@@ -576,7 +596,7 @@ if st.sidebar.button("🔄 Обновить данные"):
     st.cache_data.clear()
     st.rerun()
 
-# --- 3. Розрахунок аналітики ---
+# --- 3. Расчет аналитики ---
 if analytics and not df_options.empty:
     metrics = analytics.calculate_metrics(
         exp_filter=selected_exp, spot_price=btc_price
@@ -602,7 +622,7 @@ else:
     call_wall, put_wall, weighted_pcr = 66500, 61000, 0.35
 
 
-# --- 4. Карточки метрик верхньої панелі ---
+# --- 4. Карточки метрик верхней панели ---
 def render_card(
     label,
     value,
@@ -696,46 +716,46 @@ col7.markdown(
     unsafe_allow_html=True,
 )
 
-# --- 5. Динамічний торговий сценарій та аналіз маніпуляцій ---
+# --- 5. Динамический торговый сценарий и анализ манипуляций (НА РУССКОМ) ---
 st.markdown("<br>", unsafe_allow_html=True)
 
-trade_bias = "🧘 ФЛЕТ / MEAN REVERSION"
+trade_bias = "🧘 ФЛЭТ / MEAN REVERSION"
 bias_color = "#38BDF8"
 action_plan = ""
 
 if spot_delta_usd < -1.0 and futures_delta_usd > 2.0:
-    trade_bias = "🔴 ПРІОРИТЕТ: ШОРТ (Бычья ловушка / Bull Trap)"
+    trade_bias = "🔴 ПРИОРИТЕТ: ШОРТ (Бычья ловушка / Bull Trap)"
     bias_color = "#FF5252"
     action_plan = f"""
-    * <b>Торговий вектор:</b> Шукати входи в <b>SHORT</b> на відскоках у зону <b>${gamma_flip:,.0f} — ${max_pain:,.0f}</b>.
-    * <b>Причина маніпуляції:</b> Ф'ючерси штучно розганяють (<b>{futures_delta_usd:+.1f}M$</b>), поки на Споті йде скидання (<b>{spot_delta_usd:+.1f}M$</b>). Дрібні гравці набирають лонги в ліміти маркетмейкерів.
-    * <b>Механіка Delta-Hedging:</b> Високий Skew ({skew_25d:+.2f}%) та PCR ({weighted_pcr:.2f}) свідчать про активну купівлю Put-опціонів. Маркетмейкери змушені хеджуватись і <b>продавати BTC</b> у стакан, підсилюючи тиск продавців.
-    * <b>Скасування сценарію (Стоп):</b> Закріплення 15m-свічки вище Vol Trigger (<b>${gamma_flip:,.0f}</b>) з розворотом Спот-дельти у плюс.
-    * <b>Найближчі цілі:</b> ${btc_price * 0.99:,.0f} (локальний лой) та Put Wall (<b>${put_wall:,.0f}</b>).
+    * <b>Торговый вектор:</b> Искать входы в <b>SHORT</b> на отскоках в зону <b>${gamma_flip:,.0f} — ${max_pain:,.0f}</b>.
+    * <b>Причина манипуляции:</b> Фьючерсы искусственно разгоняют (<b>{futures_delta_usd:+.1f}M$</b>), пока на Споте идет сброс (<b>{spot_delta_usd:+.1f}M$</b>). Мелкие игроки набирают лонги в лимиты маркетмейкеров.
+    * <b>Механика Delta-Hedging:</b> Высокий Skew ({skew_25d:+.2f}%) и PCR ({weighted_pcr:.2f}) свидетельствуют об активной покупке Put-опционов. Маркетмейкеры вынуждены хеджироваться и <b>продавать BTC</b> в стакан, усиливая давление продавцов.
+    * <b>Отмена сценария (Стоп):</b> Закрепление 15m-свечи выше Vol Trigger (<b>${gamma_flip:,.0f}</b>) с разворотом Спот-дельты в плюс.
+    * <b>Ближайшие цели:</b> ${btc_price * 0.99:,.0f} (локальный лой) и Put Wall (<b>${put_wall:,.0f}</b>).
     """
 elif spot_delta_usd > 2.0 and futures_delta_usd < -1.0:
-    trade_bias = "🟢 ПРІОРИТЕТ: ЛОНГ (Медвежья ловушка / Bear Trap)"
+    trade_bias = "🟢 ПРИОРИТЕТ: ЛОНГ (Медвежья ловушка / Bear Trap)"
     bias_color = "#00E676"
     action_plan = f"""
-    * <b>Торговий вектор:</b> Шукати входи в <b>LONG</b> від поточних рівнів або підтримки <b>${put_wall:,.0f}</b>.
-    * <b>Причина маніпуляції:</b> Спот активно викуповують (<b>{spot_delta_usd:+.1f}M$</b>), незважаючи на тиск ф'ючерсів (<b>{futures_delta_usd:+.1f}M$</b>). Готується шорт-сквіз.
-    * <b>Механіка Delta-Hedging:</b> Зниження Skew та закриття Put-опціонів змушує маркетмейкерів відкуповувати свої шорти для зняття хеджу.
-    * <b>Цілі:</b> Max Pain (<b>${max_pain:,.0f}</b>) та Call Wall (<b>${call_wall:,.0f}</b>).
+    * <b>Торговый вектор:</b> Искать входы в <b>LONG</b> от текущих уровней или поддержки <b>${put_wall:,.0f}</b>.
+    * <b>Причина манипуляции:</b> Спот активно выкупают (<b>{spot_delta_usd:+.1f}M$</b>), несмотря на давление фьючерсов (<b>{futures_delta_usd:+.1f}M$</b>). Готовится шорт-сквиз.
+    * <b>Механика Delta-Hedging:</b> Снижение Skew и закрытие Put-опционов заставляет маркетмейкеров откупать свои шорты для снятия хеджа.
+    * <b>Цели:</b> Max Pain (<b>${max_pain:,.0f}</b>) и Call Wall (<b>${call_wall:,.0f}</b>).
     """
 elif net_gex < 0 and btc_price < gamma_flip:
-    trade_bias = "⚠️ ВИСОКА ВОЛАТИЛЬНІСТЬ: Пробій донизу (High Volatility)"
+    trade_bias = "⚠️ ВЫСОКАЯ ВОЛАТИЛЬНОСТЬ: Пробой вниз (High Volatility)"
     bias_color = "#FFA726"
     action_plan = f"""
-    * <b>Торговий вектор:</b> Торгівля за імпульсом на пробій локальних рівнів.
-    * <b>Причина:</b> Від'ємний GEX (<b>${net_gex:.1f}M</b>) підсилює будь-який рух. Ціна нижче Vol Trigger (<b>${gamma_flip:,.0f}</b>) — ММ торгують за трендом, продаючи разом з ринком.
-    * <b>Рижик:</b> Не купувати «ножі», поки ціна не повернеться вище Vol Trigger.
+    * <b>Торговый вектор:</b> Торговля по импульсу на пробой локальных уровней.
+    * <b>Причина:</b> Отрицательный GEX (<b>${net_gex:.1f}M</b>) усиливает любое движение. Цена ниже Vol Trigger (<b>${gamma_flip:,.0f}</b>) — ММ торгуют по тренду, продавая вместе с рынком.
+    * <b>Риск:</b> Не покупать «ножи», пока цена не вернется выше Vol Trigger.
     """
 else:
-    trade_bias = "🧘 ФЛЕТ / MEAN REVERSION"
+    trade_bias = "🧘 ФЛЭТ / MEAN REVERSION"
     bias_color = "#38BDF8"
     action_plan = f"""
-    * <b>Торговий вектор:</b> Торгівля від меж діапазону <b>${put_wall:,.0f} — ${call_wall:,.0f}</b> з магнітом у точці Max Pain (<b>${max_pain:,.0f}</b>).
-    * <b>Стан ринку:</b> Спот та ф'ючерси перебувають у відносній рівновазі. Волатильність гаситься маркетмейкерами (Long Gamma).
+    * <b>Торговый вектор:</b> Торговля от границ диапазона <b>${put_wall:,.0f} — ${call_wall:,.0f}</b> с магнитом в точке Max Pain (<b>${max_pain:,.0f}</b>).
+    * <b>Состояние рынка:</b> Спот и фьючерсы находятся в относительном равновесии. Волатильность гасится маркетмейкерами (Long Gamma).
     """
 
 st.markdown(
@@ -743,10 +763,10 @@ st.markdown(
     <div style="background: linear-gradient(135deg, #121824 0%, #0b0e14 100%); border-left: 5px solid {bias_color}; border-radius: 10px; padding: 18px 22px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <h3 style="margin: 0; color: {bias_color}; font-size: 18px; font-weight: 700;">
-                Аналіз ринку та торговий план: {trade_bias}
+                Анализ рынка и торговый план: {trade_bias}
             </h3>
             <span style="background: #1e2430; color: #9ca3af; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-family: 'JetBrains Mono';">
-                Експірація: {selected_exp}
+                Экспирация: {selected_exp}
             </span>
         </div>
         <div style="color: #d1d4dc; font-size: 13.5px; line-height: 1.6;">
@@ -959,7 +979,7 @@ with tab_main:
         },
     )
 
-# ==================== TAB 2: АНАЛІТИКА НА 1 ДЕНЬ (0DTE/1DTE) ====================
+# ==================== TAB 2: АНАЛИТИКА НА 1 ДЕНЬ (0DTE/1DTE) ====================
 with tab_1day:
     st.subheader("⚡ 1-Day Intraday Liquidity & Expected Move")
 
