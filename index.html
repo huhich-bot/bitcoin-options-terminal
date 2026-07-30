@@ -15,7 +15,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.0/build/stlite.js"></script>
     <script>
       stlite.mount({
-        // Бібліотеки з вашого requirements.txt
+        // Основні бібліотеки для обчислень і графіків
         requirements: [
           "pandas",
           "requests",
@@ -24,10 +24,22 @@
         ],
         entrypoint: "app.py",
         files: {
-          // Завантажуємо ваш головний файл app.py
-          "app.py": {
-            url: "./app.py"
-          }
+          // 1. Головний файл
+          "app.py": { url: "./app.py" },
+
+          // 2. Файли з папки analytics
+          "analytics/__init__.py": { url: "./analytics/__init__.py" },
+          // Якщо в папці analytics є інші .py файли, додайте їх за аналогією нижче:
+          // "analytics/greeks.py": { url: "./analytics/greeks.py" },
+
+          // 3. Файли з папки api
+          "api/__init__.py": { url: "./api/__init__.py" },
+          // "api/binance.py": { url: "./api/binance.py" },
+          // "api/deribit.py": { url: "./api/deribit.py" },
+
+          // 4. Файли з папки charts
+          "charts/__init__.py": { url: "./charts/__init__.py" }
+          // "charts/plots.py": { url: "./charts/plots.py" }
         }
       }, document.getElementById("root"))
     </script>
