@@ -15,7 +15,7 @@ def norm_pdf(x: float) -> float:
 def calculate_bs_greeks(
     S: float, K: float, T: float, r: float = 0.0, sigma: float = 0.55
 ) -> dict:
-    """Расчет Греков (Delta, Gamma, Vanna, Charm) по Блэку-Шоулзу."""
+    """Розрахунок Греків (Delta, Gamma, Vanna, Charm) за Блеком-Шоулзом."""
     if T <= 0.0001 or sigma <= 0 or S <= 0 or K <= 0:
         return {
             "delta_call": 0.0,
@@ -36,7 +36,6 @@ def calculate_bs_greeks(
         gamma = pdf_d1 / (S * sigma * np.sqrt(T))
         vanna = -pdf_d1 * d2 / sigma
 
-        # Charm (Delta Bleed)
         charm_call = -pdf_d1 * (
             2 * r * T - d2 * sigma * np.sqrt(T)
         ) / (2 * T * sigma * np.sqrt(T))
@@ -98,7 +97,6 @@ class OptionAnalytics:
         )
 
     def calculate_skew_25d(self, spot_price: float = 0.0) -> float:
-        """Расчет 25D Skew: IV(Put 25D) - IV(Call 25D)."""
         if self.df.empty:
             return 0.0
         try:
@@ -160,7 +158,7 @@ class OptionAnalytics:
             return 0.0
 
     def calculate_metrics(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> dict:
         if self.df.empty:
             return {
@@ -173,7 +171,7 @@ class OptionAnalytics:
             }
 
         df_filtered = self.df.copy()
-        if exp_filter != "Все" and "expiration_str" in df_filtered.columns:
+        if exp_filter != "Всі" and "expiration_str" in df_filtered.columns:
             df_filtered = df_filtered[
                 df_filtered["expiration_str"] == exp_filter
             ]
@@ -232,12 +230,12 @@ class OptionAnalytics:
             "nearest_dte": nearest_dte,
         }
 
-    def calculate_max_pain(self, exp_filter: str = "Все") -> float:
+    def calculate_max_pain(self, exp_filter: str = "Всі") -> float:
         if self.df.empty:
             return 0.0
 
         df_filtered = self.df.copy()
-        if exp_filter != "Все" and "expiration_str" in df_filtered.columns:
+        if exp_filter != "Всі" and "expiration_str" in df_filtered.columns:
             df_filtered = df_filtered[
                 df_filtered["expiration_str"] == exp_filter
             ]
@@ -271,12 +269,12 @@ class OptionAnalytics:
         min_idx = np.argmin(total_losses)
         return float(strikes[min_idx])
 
-    def get_oi_profile(self, exp_filter: str = "Все") -> pd.DataFrame:
+    def get_oi_profile(self, exp_filter: str = "Всі") -> pd.DataFrame:
         if self.df.empty:
             return pd.DataFrame(columns=["strike", "call", "put", "total_oi"])
 
         df_filtered = self.df.copy()
-        if exp_filter != "Все" and "expiration_str" in df_filtered.columns:
+        if exp_filter != "Всі" and "expiration_str" in df_filtered.columns:
             df_filtered = df_filtered[
                 df_filtered["expiration_str"] == exp_filter
             ]
@@ -300,7 +298,7 @@ class OptionAnalytics:
         return profile
 
     def get_gex_profile(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> pd.DataFrame:
         if self.df.empty or spot_price <= 0:
             return pd.DataFrame(
@@ -308,7 +306,7 @@ class OptionAnalytics:
             )
 
         df_filtered = self.df.copy()
-        if exp_filter != "Все" and "expiration_str" in df_filtered.columns:
+        if exp_filter != "Всі" and "expiration_str" in df_filtered.columns:
             df_filtered = df_filtered[
                 df_filtered["expiration_str"] == exp_filter
             ]
@@ -361,7 +359,7 @@ class OptionAnalytics:
         return profile
 
     def get_vanna_charm_profile(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> pd.DataFrame:
         if self.df.empty or spot_price <= 0:
             return pd.DataFrame(
@@ -369,7 +367,7 @@ class OptionAnalytics:
             )
 
         df_work = self.df.copy()
-        if exp_filter != "Все" and "expiration_str" in df_work.columns:
+        if exp_filter != "Всі" and "expiration_str" in df_work.columns:
             df_work = df_work[df_work["expiration_str"] == exp_filter]
 
         if df_work.empty:
@@ -386,11 +384,9 @@ class OptionAnalytics:
             )
             oi = r["open_interest"]
 
-            # Vanna Exposure ($M на 1% IV)
             v_val = oi * g["vanna"] * spot_price * 0.01 / 1e6
             vanna_list.append(v_val if r["type"] == "call" else -v_val)
 
-            # Charm Exposure ($M в день)
             ch_val = (
                 oi
                 * (
@@ -416,7 +412,7 @@ class OptionAnalytics:
         return profile.sort_values("strike")
 
     def calculate_net_gex(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> float:
         gex_df = self.get_gex_profile(
             exp_filter=exp_filter, spot_price=spot_price
@@ -426,9 +422,8 @@ class OptionAnalytics:
         return float(gex_df["net_gex"].sum())
 
     def calculate_vanna_charm_exposure(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> tuple:
-        """Возвращает суммарное Vanna ($M / 1% IV) и Charm ($M / день)."""
         v_df = self.get_vanna_charm_profile(
             exp_filter=exp_filter, spot_price=spot_price
         )
@@ -439,7 +434,7 @@ class OptionAnalytics:
         )
 
     def calculate_net_vanna(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> float:
         v_df = self.get_vanna_charm_profile(
             exp_filter=exp_filter, spot_price=spot_price
@@ -449,13 +444,13 @@ class OptionAnalytics:
         return float(v_df["vanna_m"].sum())
 
     def find_gamma_flip(
-        self, exp_filter: str = "Все", spot_price: float = 0.0
+        self, exp_filter: str = "Всі", spot_price: float = 0.0
     ) -> float:
         if self.df.empty or spot_price <= 0:
             return 0.0
 
         df_filtered = self.df.copy()
-        if exp_filter != "Все" and "expiration_str" in df_filtered.columns:
+        if exp_filter != "Всі" and "expiration_str" in df_filtered.columns:
             df_filtered = df_filtered[
                 df_filtered["expiration_str"] == exp_filter
             ]
@@ -491,6 +486,64 @@ class OptionAnalytics:
 
         return 0.0
 
+    # =========================================================================
+    # НОВІ МЕТОДИ: GCI ТА BREAKOUT PROBABILITY
+    # =========================================================================
+    def calculate_gci(self, exp_filter: str = "Всі", spot_price: float = 0.0) -> float:
+        """
+        Gamma Compression Index (GCI): від 0.0 до 100.0.
+        Оцінює концентрацію Gamma біля споту відносно загальної Gamma ринку.
+        """
+        if self.df.empty or spot_price <= 0:
+            return 45.0
+
+        gex_df = self.get_gex_profile(exp_filter=exp_filter, spot_price=spot_price)
+        if gex_df.empty:
+            return 45.0
+
+        total_abs_gex = gex_df["net_gex"].abs().sum()
+        if total_abs_gex == 0:
+            return 45.0
+
+        near_spot_df = gex_df[gex_df["strike"].between(spot_price * 0.97, spot_price * 1.03)]
+        near_gex = near_spot_df["net_gex"].abs().sum()
+
+        ratio = near_gex / total_abs_gex
+        gci = float(np.clip(ratio * 180.0, 5.0, 99.9))
+        return round(gci, 1)
+
+    def calculate_breakout_probability(
+        self, exp_filter: str = "Всі", spot_price: float = 0.0, gamma_flip: float = 0.0
+    ) -> float:
+        """
+        Breakout Probability (%): Ймовірність виходу з флету.
+        Враховує GCI, Net GEX та дистанцію до Zero Gamma Flip.
+        """
+        if spot_price <= 0:
+            return 30.0
+
+        gci = self.calculate_gci(exp_filter=exp_filter, spot_price=spot_price)
+        net_gex = self.calculate_net_gex(exp_filter=exp_filter, spot_price=spot_price)
+        
+        # Базова ймовірність від GCI
+        prob = gci * 0.5
+        
+        # Вплив Net GEX: Short Gamma піднімає ймовірність пробою
+        if net_gex < 0:
+            prob += min(abs(net_gex) * 0.4, 30.0)
+        else:
+            prob -= min(net_gex * 0.2, 20.0)
+            
+        # Близькість до Zero Gamma Flip збільшує ймовірність імпульсу
+        if gamma_flip > 0:
+            dist_pct = abs(spot_price - gamma_flip) / spot_price * 100.0
+            if dist_pct < 1.0:
+                prob += 20.0
+            elif dist_pct < 2.5:
+                prob += 10.0
+
+        return round(float(np.clip(prob, 5.0, 95.0)), 1)
+
     def evaluate_sentiment(
         self,
         btc_price: float,
@@ -504,75 +557,70 @@ class OptionAnalytics:
         reasons = []
         score = 0
 
-        # 1. Gamma Режим
         if net_gex > 0.5:
             reasons.append(
-                f"<b>Long Gamma (+${net_gex:,.1f}M):</b> Маркетмейкеры гасят"
-                " волатильность. Рынок склонен к флэту и возврату к среднему."
+                f"<b>Long Gamma (+${net_gex:,.1f}M):</b> Маркетмейкери гасять"
+                " волатильність. Ринок схильний до флету і повернення до середнього."
             )
             score += 1
         elif net_gex < -0.5:
             reasons.append(
-                f"<b>Short Gamma (-${abs(net_gex):,.1f}M):</b> Маркетмейкеры"
-                " ускоряют движение. Высокий риск каскадного пробоя."
+                f"<b>Short Gamma (-${abs(net_gex):,.1f}M):</b> Маркетмейкери"
+                " прискорюють рух. Високий ризик каскадного пробою."
             )
             score -= 1
 
-        # 2. Vanna Exposure
         if net_vanna != 0:
-            action = "покупать" if net_vanna > 0 else "продавать"
+            action = "купувати" if net_vanna > 0 else "продавати"
             reasons.append(
                 f"<b>Net Vanna Exposure (${net_vanna:,.1f}M / 1% IV):</b> При"
-                f" скачке волатильности ММ вынуждены {action} фьючерсы."
+                f" стрибку волатильності ММ змушені {action} ф'ючерси."
             )
 
-        # 3. 25D Skew
         if skew_25d > 2.0:
             reasons.append(
-                f"<b>25D Skew (+{skew_25d}%):</b> Повышенный страх — киты массово"
-                " скупают Put-страховку."
+                f"<b>25D Skew (+{skew_25d}%):</b> Підвищений страх — кити масово"
+                " скуповують Put-страховку."
             )
             score -= 1
         elif skew_25d < -2.0:
             reasons.append(
-                f"<b>25D Skew ({skew_25d}%):</b> Бычий перекос — высокий спрос на Call-опционы."
+                f"<b>25D Skew ({skew_25d}%):</b> Бичачий перекос — високий попит на Call-опціони."
             )
             score += 1
 
-        # 4. Vol Trigger
         if gamma_flip > 0:
             if btc_price > gamma_flip:
                 reasons.append(
-                    f"Цена (${btc_price:,.0f}) выше <b>Vol Trigger"
-                    f" (${gamma_flip:,.0f})</b> — зона низкого импульсного"
-                    " риска."
+                    f"Ціна (${btc_price:,.0f}) вище <b>Vol Trigger"
+                    f" (${gamma_flip:,.0f})</b> — зона низького імпульсного"
+                    " ризику."
                 )
                 score += 1
             else:
                 reasons.append(
-                    f"Цена (${btc_price:,.0f}) ниже <b>Vol Trigger"
-                    f" (${gamma_flip:,.0f})</b> — триггер ускорения падения."
+                    f"Ціна (${btc_price:,.0f}) нижче <b>Vol Trigger"
+                    f" (${gamma_flip:,.0f})</b> — триггер прискорення падіння."
                 )
                 score -= 1
 
-        # 5. Max Pain
         if max_pain > 0:
             if btc_price < max_pain:
                 score += 1
                 reasons.append(
-                    f"Цена (${btc_price:,.0f}) ниже Max Pain (${max_pain:,.0f})"
-                    " — магнетический вектор вверх к экспирации."
+                    f"Ціна (${btc_price:,.0f}) нижче Max Pain (${max_pain:,.0f})"
+                    " — магнетичний вектор вгору до експірації."
                 )
             elif btc_price > max_pain:
                 score -= 1
                 reasons.append(
-                    f"Цена (${btc_price:,.0f}) выше Max Pain (${max_pain:,.0f})"
-                    " — сдерживающий фактор сверху."
+                    f"Ціна (${btc_price:,.0f}) вище Max Pain (${max_pain:,.0f})"
+                    " — стримуючий фактор зверху."
                 )
 
         if not reasons:
             reasons.append(
-                "Недостаточно данных для формирования однозначного прогноза."
+                "Недостатньо даних для формування однозначного прогнозу."
             )
 
         if score >= 2:

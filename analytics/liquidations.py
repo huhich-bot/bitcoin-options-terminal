@@ -68,7 +68,7 @@ class LiquidationCalculator:
         if not raw_levels:
             return []
 
-        # Сортуємо та групємо близькі рівні (кластеризація в межах 0.8%)
+        # Сортуємо та групуємо близькі рівні (кластеризація в межах 0.8%)
         raw_levels.sort(key=lambda x: x["price"])
         clustered = []
         

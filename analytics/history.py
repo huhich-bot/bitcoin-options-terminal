@@ -31,14 +31,14 @@ def save_snapshot(btc_price: float, max_pain: float, call_wall: float, put_wall:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # Проверка: не записывать дубликат, если с последнего снимка прошло меньше 15 минут
+    # Перевірка: не записувати дублікат, якщо з останнього знімка минуло менше 15 хвилин
     cursor.execute("SELECT timestamp FROM snapshots ORDER BY id DESC LIMIT 1")
     last_row = cursor.fetchone()
     
     now = datetime.utcnow()
     if last_row:
         last_time = datetime.strptime(last_row[0], "%Y-%m-%d %H:%M:%S")
-        if (now - last_time).total_seconds() < 900:  # 15 минут
+        if (now - last_time).total_seconds() < 900:  # 15 хвилин
             conn.close()
             return
 
